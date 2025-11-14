@@ -5,9 +5,9 @@ from .solver_client import CircuitBreaker, ExternalSolverClient
 from .solver_local import LocalSolver
 
 __all__ = [
+    "CircuitBreaker",
     "CubeValidationError",
     "CubeValidator",
-    "CircuitBreaker",
     "ExternalSolverClient",
     "LocalSolver",
 ]

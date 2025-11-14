@@ -1,8 +1,10 @@
 """Utility helpers for translating error messages."""
 
+# ruff: noqa: RUF001
+
 from __future__ import annotations
 
-from typing import Mapping
+from collections.abc import Mapping
 
 _SUPPORTED_LANGUAGES = ("en", "ru")
 

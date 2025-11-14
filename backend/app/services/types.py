@@ -2,7 +2,5 @@
 
 from __future__ import annotations
 
-from typing import Tuple
-
-MoveSequence = Tuple[str, ...]
+MoveSequence = tuple[str, ...]
 NormalizedCubeState = str

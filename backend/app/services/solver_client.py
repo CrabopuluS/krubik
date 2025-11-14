@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import time
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping
+from http import HTTPStatus
+from typing import Any
 
 import httpx
 import structlog
@@ -99,7 +101,7 @@ class ExternalSolverClient:
                     json={"state": state},
                     timeout=self._timeout,
                 )
-                if response.status_code >= 500:
+                if response.status_code >= HTTPStatus.INTERNAL_SERVER_ERROR:
                     raise ExternalSolverError(
                         "external_unavailable",
                         {"status_code": response.status_code},

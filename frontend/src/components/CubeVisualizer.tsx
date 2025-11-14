@@ -47,7 +47,11 @@ const CubeVisualizer = () => {
             <div
               key={id}
               className="cube-face"
-              style={{ transform: FACE_TRANSFORMS[id], width: `${CUBE_SIZE}px`, height: `${CUBE_SIZE}px` }}
+              style={{
+                transform: FACE_TRANSFORMS[id],
+                width: `${CUBE_SIZE}px`,
+                height: `${CUBE_SIZE}px`,
+              }}
             >
               {stickers.map((sticker, index) => (
                 <span

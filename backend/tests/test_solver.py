@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from app.dependencies import SolverFacade
 from app.services.cube_validator import CubeValidationError, CubeValidator
 from app.services.solver_local import LocalSolver
@@ -12,7 +11,7 @@ class StubSolver(LocalSolver):
         super().__init__(cache_size=32)
         self._should_fail = should_fail
 
-    def solve(self, state: str):  # type: ignore[override]
+    def solve(self, state: str) -> tuple[str, ...]:  # type: ignore[override]
         if self._should_fail:
             raise ValueError('parity error')
         return tuple(state)
@@ -35,7 +34,7 @@ def test_validator_unsolvable() -> None:
 @pytest.mark.asyncio
 async def test_solver_facade_fallback() -> None:
     class FailingExternal:
-        async def solve(self, state: str):
+        async def solve(self, state: str) -> tuple[str, ...]:
             raise RuntimeError('boom')
 
     facade = SolverFacade(external_client=FailingExternal(), local_solver=StubSolver())

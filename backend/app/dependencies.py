@@ -3,20 +3,26 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from functools import lru_cache
-from typing import AsyncIterator
+from typing import Annotated
 
 import httpx
+import structlog
 from fastapi import Depends, Request
 from pydantic import Field
 from pydantic_settings import BaseSettings
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-import structlog
 
 from .services.cube_validator import CubeValidator
-from .services.solver_client import CircuitBreaker, ExternalSolverClient
+from .services.solver_client import (
+    CircuitBreaker,
+    CircuitBreakerOpenError,
+    ExternalSolverClient,
+    ExternalSolverError,
+)
 from .services.solver_local import LocalSolver
 from .services.types import NormalizedCubeState
 
@@ -102,7 +108,8 @@ class SolverFacade:
             if self._external_client is not None:
                 moves = await self._external_client.solve(state)
                 return list(moves), "external"
-        except Exception as exc:  # pragma: no cover - fallback handled below
+        except (CircuitBreakerOpenError, ExternalSolverError, httpx.HTTPError) as exc:
+            # The external solver failed; log the sanitized error and fallback to the local solver.
             self._logger.warning("external_solver_fallback", error=str(exc))
             self._external_client = None
 
@@ -113,9 +120,9 @@ class SolverFacade:
 
 async def get_solver_facade(
     request: Request,
-    settings: Settings = Depends(get_settings),
-    local_solver: LocalSolver = Depends(get_local_solver),
-    circuit_breaker: CircuitBreaker = Depends(get_circuit_breaker),
+    settings: Annotated[Settings, Depends(get_settings)],
+    local_solver: Annotated[LocalSolver, Depends(get_local_solver)],
+    circuit_breaker: Annotated[CircuitBreaker, Depends(get_circuit_breaker)],
 ) -> SolverFacade:
     http_client: httpx.AsyncClient | None = getattr(request.app.state, "http_client", None)
     external_client: ExternalSolverClient | None = None

@@ -1,7 +1,5 @@
 export const getCookie = (name: string): string | null => {
-  const value = document.cookie
-    .split('; ')
-    .find((row) => row.startsWith(`${name}=`));
+  const value = document.cookie.split('; ').find((row) => row.startsWith(`${name}=`));
   if (!value) {
     return null;
   }

@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Final, Mapping
+from typing import Final
+
+try:
+    from kociemba import solve as kociemba_solve
+except ImportError:  # pragma: no cover - optional dependency
+    kociemba_solve = None  # type: ignore[assignment]
 
 from .solver_local import LocalSolver
 from .types import NormalizedCubeState
@@ -72,8 +78,11 @@ class CubeValidator:
             if solver is not None:
                 solver.solve(state)
             else:  # pragma: no cover - fallback path
-                from kociemba import solve as solve_cube
-
-                solve_cube(state)
+                if kociemba_solve is None:
+                    raise CubeValidationError(
+                        "unsolvable",
+                        {"reason": "local solver unavailable"},
+                    )
+                kociemba_solve(state)
         except ValueError as exc:  # pragma: no cover - depends on invalid input
             raise CubeValidationError("unsolvable", {"reason": str(exc)}) from exc

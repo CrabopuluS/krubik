@@ -1,5 +1,6 @@
-[tool.ruff]
 line-length = 100
+
+[lint]
 select = [
   "E",
   "F",
@@ -16,5 +17,5 @@ select = [
 ]
 ignore = ["S101", "A003"]
 
-[tool.ruff.lint.per-file-ignores]
+[lint.per-file-ignores]
 "backend/tests/**" = ["S101", "S311"]

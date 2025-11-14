@@ -24,16 +24,23 @@ const API_URL =
   globalRuntime.process?.env?.VITE_API_URL ??
   'http://localhost:8000/solve';
 const CSRF_COOKIE =
-  globalRuntime.krubikConfig?.csrfCookie ?? globalRuntime.process?.env?.VITE_CSRF_COOKIE ?? 'csrf_token';
+  globalRuntime.krubikConfig?.csrfCookie ??
+  globalRuntime.process?.env?.VITE_CSRF_COOKIE ??
+  'csrf_token';
 const CSRF_HEADER =
-  globalRuntime.krubikConfig?.csrfHeader ?? globalRuntime.process?.env?.VITE_CSRF_HEADER ?? 'X-CSRF-Token';
+  globalRuntime.krubikConfig?.csrfHeader ??
+  globalRuntime.process?.env?.VITE_CSRF_HEADER ??
+  'X-CSRF-Token';
 
 const ensureCsrfToken = (): string => {
   const existing = getCookie(CSRF_COOKIE);
   if (existing) {
     return existing;
   }
-  const token = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2);
+  const token =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2);
   setCookie(CSRF_COOKIE, token);
   return token;
 };

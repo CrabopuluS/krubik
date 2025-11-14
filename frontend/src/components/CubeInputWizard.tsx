@@ -23,7 +23,8 @@ const CubeInputWizard = () => {
   const palette = useMemo(() => FACE_ORDER, []);
   const isBusy = status === 'loading' || isPending;
 
-  const handleNext = () => setActiveFaceIndex((index) => Math.min(index + 1, FACE_ORDER.length - 1));
+  const handleNext = () =>
+    setActiveFaceIndex((index) => Math.min(index + 1, FACE_ORDER.length - 1));
   const handlePrevious = () => setActiveFaceIndex((index) => Math.max(index - 1, 0));
 
   const applyColor = useCallback(

@@ -5,15 +5,16 @@ from __future__ import annotations
 import hashlib
 import logging
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import Annotated
 
+import structlog
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-import structlog
 
 from .dependencies import (
     Settings,
@@ -50,6 +51,29 @@ def configure_logging(level: str) -> None:
 
 settings = get_settings()
 limiter = get_limiter()
+
+
+@dataclass(slots=True)
+class SolveContext:
+    """Aggregate dependencies for the solver endpoint."""
+
+    settings: Settings
+    validator: CubeValidator
+    solver: SolverFacade
+
+
+def get_solve_context(
+    settings_dependency: Annotated[Settings, Depends(get_settings)],
+    validator: Annotated[CubeValidator, Depends(get_cube_validator)],
+    solver_facade: Annotated[SolverFacade, Depends(get_solver_facade)],
+) -> SolveContext:
+    """Bundle dependencies to satisfy ruff complexity constraints."""
+
+    return SolveContext(
+        settings=settings_dependency,
+        validator=validator,
+        solver=solver_facade,
+    )
 
 
 @asynccontextmanager
@@ -113,18 +137,16 @@ async def solve_cube(
     request: Request,
     response: Response,
     payload: SolveRequest,
+    context: Annotated[SolveContext, Depends(get_solve_context)],
     accept_language: Annotated[str | None, Header(alias="Accept-Language")] = None,
-    settings_dependency: Settings = Depends(get_settings),
-    validator: CubeValidator = Depends(get_cube_validator),
-    solver_facade: SolverFacade = Depends(get_solver_facade),
 ) -> SolveResponse:
     """Validate cube state, solve it and return the move sequence."""
 
     language = resolve_language(accept_language)
     if limiter.enabled:
         limiter._check_request_limit(request, solve_cube, False)
-    csrf_cookie = request.cookies.get(settings_dependency.csrf_cookie_name)
-    csrf_header = request.headers.get(settings_dependency.csrf_header_name)
+    csrf_cookie = request.cookies.get(context.settings.csrf_cookie_name)
+    csrf_header = request.headers.get(context.settings.csrf_header_name)
     if not csrf_cookie or csrf_cookie != csrf_header:
         message = translate("invalid_csrf", language)
         raise HTTPException(
@@ -133,7 +155,7 @@ async def solve_cube(
         )
 
     try:
-        normalized = validator.validate(payload.state)
+        normalized = context.validator.validate(payload.state)
     except CubeValidationError as exc:
         message = translate(exc.message_key, language, **(exc.context or {}))
         LOGGER.info(
@@ -146,7 +168,7 @@ async def solve_cube(
             detail={"code": exc.message_key, "message": message},
         ) from exc
 
-    moves, source = await solver_facade.solve(normalized)
+    moves, source = await context.solver.solve(normalized)
     result = SolveResponse(moves=moves, source=source)
 
     if limiter.enabled and hasattr(request.state, "view_rate_limit"):

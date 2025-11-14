@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from http import HTTPStatus
 from typing import Any
+from uuid import uuid4
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.dependencies import SolverFacade, get_cube_validator, get_solver_facade
 from app.main import app
 from app.services.cube_validator import CubeValidationError, CubeValidator
+from fastapi.testclient import TestClient
 
 
 class DummyValidator(CubeValidator):
@@ -41,15 +42,15 @@ def override_dependencies() -> Iterator[None]:
 @pytest.fixture
 def client() -> Iterator[TestClient]:
     with TestClient(app) as client:
-        token = 'test-token'
-        client.cookies.set('csrf_token', token)
-        client.headers.update({'X-CSRF-Token': token, 'Accept-Language': 'ru'})
+        csrf_token = uuid4().hex
+        client.cookies.set('csrf_token', csrf_token)
+        client.headers.update({'X-CSRF-Token': csrf_token, 'Accept-Language': 'ru'})
         yield client
 
 
 def test_solve_success(client: TestClient) -> None:
     response = client.post('/solve', json={'state': 'uuu'})
-    assert response.status_code == 200
+    assert response.status_code == HTTPStatus.OK
     body: dict[str, Any] = response.json()
     assert body['moves'] == ['R', 'U']
     assert body['source'] == 'external'
@@ -57,7 +58,7 @@ def test_solve_success(client: TestClient) -> None:
 
 def test_solve_validation_error_translated(client: TestClient) -> None:
     response = client.post('/solve', json={'state': 'bad'})
-    assert response.status_code == 422
+    assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
     detail = response.json()['detail']
     assert detail['code'] == 'invalid_length'
     assert 'стикеров' in detail['message']
@@ -66,6 +67,6 @@ def test_solve_validation_error_translated(client: TestClient) -> None:
 def test_csrf_protection() -> None:
     with TestClient(app) as client:
         response = client.post('/solve', json={'state': 'uuu'})
-    assert response.status_code == 403
+    assert response.status_code == HTTPStatus.FORBIDDEN
     detail = response.json()['detail']
     assert detail['code'] == 'invalid_csrf'
