@@ -1,0 +1,12 @@
+LICENSE
+README.md
+pyproject.toml
+backend/app/__init__.py
+backend/app/main.py
+backend/app/services/__init__.py
+backend/app/services/solver.py
+backend/krubik.egg-info/PKG-INFO
+backend/krubik.egg-info/SOURCES.txt
+backend/krubik.egg-info/dependency_links.txt
+backend/krubik.egg-info/requires.txt
+backend/krubik.egg-info/top_level.txt
