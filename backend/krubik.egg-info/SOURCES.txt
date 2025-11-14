@@ -2,9 +2,14 @@ LICENSE
 README.md
 pyproject.toml
 backend/app/__init__.py
+backend/app/dependencies.py
+backend/app/localization.py
 backend/app/main.py
 backend/app/services/__init__.py
-backend/app/services/solver.py
+backend/app/services/cube_validator.py
+backend/app/services/solver_client.py
+backend/app/services/solver_local.py
+backend/app/services/types.py
 backend/krubik.egg-info/PKG-INFO
 backend/krubik.egg-info/SOURCES.txt
 backend/krubik.egg-info/dependency_links.txt
