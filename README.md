@@ -1,31 +1,45 @@
 # Krubik
 
-Полноценный стек для вычисления решения кубика Рубика методом Коцимбы. Репозиторий содержит FastAPI-бэкенд, фронтенд на React + Vite и инфраструктуру для запуска через Docker Compose с обратным прокси и HTTPS.
+Полноценная платформа для поиска оптимального решения кубика Рубика методом Коцимбы. Репозиторий включает:
 
-## Структура
+- **Backend** — FastAPI (Python 3.12) с валидацией состояний, внешним HTTP‑клиентом, Circuit Breaker, rate limiting и локальным решателем.
+- **Frontend** — React 18 + TypeScript + Vite, drag & drop мастер ввода, 3D‑визуализация и панель шагов с анимацией.
+- **Инфраструктура** — Docker Compose (backend, frontend, nginx), готовые Make‑таргеты и CI‑пайплайн.
 
-- `backend/` — приложение FastAPI с REST API `/solve` и сервисом-обёрткой над `kociemba`.
-- `frontend/` — интерфейс на React 18 + TypeScript с визуализацией куба и отображением маршрута.
-- `infrastructure/` — конфигурация Nginx для обратного прокси.
-- `docker-compose.yml` — описание сервисов (backend, frontend, proxy).
-
-## Подготовка окружения
-
-### Зависимости
+## Требования
 
 - Python 3.12+
 - Node.js LTS (20.x)
-- Docker 24+ и Docker Compose Plugin
+- Docker 24+ и Docker Compose plugin
 
-### Установка зависимостей
+## Установка
 
 ```bash
 make install
+cp .env.example .env
 ```
 
-### Генерация дев-сертификата
+При необходимости заполните переменные в `.env`.
 
-Для запуска HTTPS-прокси необходимо создать самоподписанный сертификат:
+## Запуск
+
+### Локально (dev-серверы)
+
+```bash
+# Backend
+uvicorn app.main:app --app-dir backend/app --reload
+
+# Frontend
+npm run dev --workspace .
+```
+
+### Через Docker Compose
+
+```bash
+make dev
+```
+
+Перед первым запуском создайте самоподписанный сертификат для `infrastructure/nginx/certs` (см. ниже).
 
 ```bash
 mkdir -p infrastructure/nginx/certs
@@ -36,23 +50,33 @@ openssl req -x509 -nodes -days 365 \
   -out infrastructure/nginx/certs/dev.crt
 ```
 
-## Скрипты
+## Make-таски
 
-- `make lint` — статический анализ Python (ruff, black, mypy) и ESLint.
-- `make test` — запуск pytest + Jest.
-- `make dev` — запуск всего стека через Docker Compose (`https://localhost`).
+| Команда              | Описание                                            |
+| -------------------- | --------------------------------------------------- |
+| `make install`       | Установка Python и Node зависимостей                |
+| `make lint`          | Ruff + Black + Mypy + ESLint + Prettier (check)     |
+| `make format`        | Автоформатирование (Black, Prettier, Ruff fix)      |
+| `make test`          | Pytest + Jest                                       |
+| `make test-e2e`      | Playwright e2e (desktop + mobile)                   |
+| `make dev`           | Запуск docker-compose стека                         |
 
 ## Переменные окружения
 
-Скопируйте `.env.sample` в `.env` и при необходимости измените значения:
+| Переменная               | Назначение                                          |
+| ------------------------ | --------------------------------------------------- |
+| `KRUBIK_CORS_ORIGINS`    | Разрешённые Origins для CORS (через запятую)        |
+| `KRUBIK_SOLVER_API_URL`  | URL внешнего solver API (может быть пустым)        |
+| `KRUBIK_RATE_LIMIT`      | Ограничение запросов (формат SlowAPI, например `10/minute`) |
+| `KRUBIK_CSRF_COOKIE`     | Имя cookie для double-submit CSRF                   |
+| `KRUBIK_CSRF_HEADER`     | Имя заголовка CSRF                                  |
+| `VITE_API_URL`           | URL эндпоинта `/solve` для фронтенда                |
 
-- `API_HOST`, `API_PORT` — конфигурация uvicorn.
-- `CORS_ORIGINS` — список разрешённых Origins (через запятую).
-- `VITE_API_URL` — публичный URL эндпоинта `/solve` для фронтенда.
+## API
 
-## Работа с API
+### POST `/solve`
 
-`POST /solve`
+Запрос:
 
 ```json
 {
@@ -64,22 +88,42 @@ openssl req -x509 -nodes -days 365 \
 
 ```json
 {
-  "moves": ["R", "U", "R'", "U'"]
+  "moves": ["R", "U", "R'", "U'"],
+  "source": "external"
 }
 ```
 
-Код 422 возвращается при неверной валидации состояния, 400 — при ошибке решателя.
+Особенности:
+
+- Валидация длины, распределения цветов и достижимости (через локальный решатель).
+- Accept-Language → локализованные сообщения (`ru`, `en`).
+- Double-submit CSRF (cookie + заголовок).
+- Rate limiting на уровне SlowAPI.
+- Логи через structlog без PII (используются хэши состояния).
+
+## Фронтенд
+
+- Drag & drop мастер ввода граней, подсказки и responsive дизайн (≤480px, ≤768px).
+- Zustand хранит состояние куба и решения, React Query управляет запросами.
+- 3D‑визуализация куба на CSS 3D, панель шагов с автоанимацией.
+- Локализация через i18next (RU/EN), всплывающие уведомления об ошибках.
 
 ## Тестирование
 
 ```bash
-make test
+make lint
+make test            # Pytest + Jest
+make test-e2e        # Playwright
 ```
 
-## Разработка фронтенда/бэкенда локально
+CI (GitHub Actions) прогоняет `pytest`, `mypy`, `ruff`, `eslint`, `prettier`, `jest`.
 
-- Фронтенд: `npm run dev`
-- Бэкенд: `uvicorn app.main:app --reload`
+## Безопасность и производительность
+
+- CORS whitelist, double-submit CSRF, rate limiting (SlowAPI), маскирование логов.
+- HTTPX с таймаутами, retry и Circuit Breaker + локальный fallback решатель.
+- LRU-кэш локального решателя, lazy загрузка компонентов, React Query кэширует ответы.
+- Статика готова к CDN, Tailwind для адаптивного UI.
 
 ## Лицензия
 

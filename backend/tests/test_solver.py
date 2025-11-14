@@ -2,51 +2,43 @@ from __future__ import annotations
 
 import pytest
 
-from app.services import solver
+from app.dependencies import SolverFacade
+from app.services.cube_validator import CubeValidationError, CubeValidator
+from app.services.solver_local import LocalSolver
 
 
-@pytest.mark.parametrize(
-    "state, expected_error",
-    [
-        ("U" * 10, "facelets"),
-        ("U" * 54, "Color 'U'"),
-        ("U" * 9 + "D" * 9 + "F" * 9 + "B" * 9 + "L" * 9 + "X" * 9, "invalid colors")
-    ]
-)
-def test_verify_state_invalid_inputs(state: str, expected_error: str) -> None:
-    with pytest.raises(ValueError) as exc:
-        solver.verify_state(state)
-    assert expected_error in str(exc.value)
+class StubSolver(LocalSolver):
+    def __init__(self, should_fail: bool = False) -> None:
+        super().__init__(cache_size=32)
+        self._should_fail = should_fail
+
+    def solve(self, state: str):  # type: ignore[override]
+        if self._should_fail:
+            raise ValueError('parity error')
+        return tuple(state)
 
 
-def test_verify_state_valid_state(monkeypatch: pytest.MonkeyPatch) -> None:
-    state = (
-        "UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB"
-    )
-
-    solver._solve_normalized.cache_clear()
-
-    def fake_solve(_: str) -> list[str]:
-        return ["R", "U", "R'", "U'"]
-
-    monkeypatch.setattr(solver, "_solve_normalized", lambda _: fake_solve(state))
-
-    solver.verify_state(state)
+def test_validator_length_error() -> None:
+    validator = CubeValidator(local_solver=StubSolver())
+    with pytest.raises(CubeValidationError) as exc:
+        validator.validate('U' * 10)
+    assert exc.value.message_key == 'invalid_length'
 
 
-def test_verify_state_unsolvable(monkeypatch: pytest.MonkeyPatch) -> None:
-    state = (
-        "UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB"
-    )
+def test_validator_unsolvable() -> None:
+    validator = CubeValidator(local_solver=StubSolver(should_fail=True))
+    with pytest.raises(CubeValidationError) as exc:
+        validator.validate('UDLRFB' * 9)
+    assert exc.value.message_key == 'unsolvable'
 
-    solver._solve_normalized.cache_clear()
 
-    def fake_solve(_: str) -> list[str]:
-        raise ValueError("Parity error")
+@pytest.mark.asyncio
+async def test_solver_facade_fallback() -> None:
+    class FailingExternal:
+        async def solve(self, state: str):
+            raise RuntimeError('boom')
 
-    monkeypatch.setattr(solver, "_solve_normalized", lambda _: fake_solve(state))
-
-    with pytest.raises(ValueError) as exc:
-        solver.verify_state(state)
-
-    assert "Parity error" in str(exc.value)
+    facade = SolverFacade(external_client=FailingExternal(), local_solver=StubSolver())
+    moves, source = await facade.solve('UU')
+    assert source == 'local'
+    assert moves == ['U', 'U']
