@@ -1,0 +1,21 @@
+line-length = 100
+
+[lint]
+select = [
+  "E",
+  "F",
+  "I",
+  "UP",
+  "B",
+  "A",
+  "SIM",
+  "N",
+  "S",
+  "BLE",
+  "PL",
+  "RUF",
+]
+ignore = ["S101", "A003"]
+
+[lint.per-file-ignores]
+"backend/tests/**" = ["S101", "S311"]

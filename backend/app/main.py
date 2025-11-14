@@ -2,17 +2,88 @@
 
 from __future__ import annotations
 
-import os
-from typing import Sequence
+import hashlib
+import logging
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from typing import Annotated
 
-from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, status
+import structlog
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
-from .services import solver
+from .dependencies import (
+    Settings,
+    SolverFacade,
+    get_cube_validator,
+    get_limiter,
+    get_settings,
+    get_solver_facade,
+    http_client_lifespan,
+)
+from .localization import resolve_language, translate
+from .services.cube_validator import CubeValidationError, CubeValidator
+from .services.types import NormalizedCubeState
 
-load_dotenv()
+LOGGER = structlog.get_logger(__name__)
+
+
+def configure_logging(level: str) -> None:
+    """Configure structlog for JSON output."""
+
+    logging.basicConfig(level=getattr(logging, level.upper(), logging.INFO))
+    structlog.configure(
+        processors=[
+            structlog.processors.add_log_level,
+            structlog.processors.TimeStamper(fmt="iso", utc=True),
+            structlog.processors.dict_tracebacks,
+            structlog.processors.JSONRenderer(),
+        ],
+        wrapper_class=structlog.make_filtering_bound_logger(
+            getattr(logging, level.upper(), logging.INFO),
+        ),
+    )
+
+
+settings = get_settings()
+limiter = get_limiter()
+
+
+@dataclass(slots=True)
+class SolveContext:
+    """Aggregate dependencies for the solver endpoint."""
+
+    settings: Settings
+    validator: CubeValidator
+    solver: SolverFacade
+
+
+def get_solve_context(
+    settings_dependency: Annotated[Settings, Depends(get_settings)],
+    validator: Annotated[CubeValidator, Depends(get_cube_validator)],
+    solver_facade: Annotated[SolverFacade, Depends(get_solver_facade)],
+) -> SolveContext:
+    """Bundle dependencies to satisfy ruff complexity constraints."""
+
+    return SolveContext(
+        settings=settings_dependency,
+        validator=validator,
+        solver=solver_facade,
+    )
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    configure_logging(settings.log_level)
+    app.state.limiter = limiter
+    app.state.rate_limit = settings.rate_limit
+    async with http_client_lifespan(settings) as client:
+        app.state.http_client = client
+        yield
 
 
 class SolveRequest(BaseModel):
@@ -23,9 +94,7 @@ class SolveRequest(BaseModel):
     model_config = {
         "json_schema_extra": {
             "example": {
-                "state": (
-                    "UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB"
-                )
+                "state": "UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB"
             }
         }
     }
@@ -35,42 +104,74 @@ class SolveResponse(BaseModel):
     """Schema representing the solver response."""
 
     moves: list[str]
+    source: str
 
 
-def _get_cors_origins() -> Sequence[str]:
-    raw = os.getenv("CORS_ORIGINS", "")
-    origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
-    return origins or ["http://localhost:5173"]
+def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    language = resolve_language(request.headers.get("Accept-Language"))
+    message = translate("rate_limited", language)
+    return JSONResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        content={"code": "rate_limited", "message": message},
+    )
 
 
-app = FastAPI(title="Krubik Solver", version="0.1.0")
+app = FastAPI(title="Krubik Solver", version="0.2.0", lifespan=lifespan)
+app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
+app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_get_cors_origins(),
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
 
-@app.post("/solve", response_model=SolveResponse, status_code=status.HTTP_200_OK)
-async def solve_cube(payload: SolveRequest) -> SolveResponse:
+def mask_state(state: NormalizedCubeState) -> str:
+    digest = hashlib.sha256(state.encode("utf-8")).hexdigest()
+    return digest[:12]
+
+@app.post("/solve", response_model=SolveResponse)
+async def solve_cube(
+    request: Request,
+    response: Response,
+    payload: SolveRequest,
+    context: Annotated[SolveContext, Depends(get_solve_context)],
+    accept_language: Annotated[str | None, Header(alias="Accept-Language")] = None,
+) -> SolveResponse:
     """Validate cube state, solve it and return the move sequence."""
 
-    try:
-        solver.verify_state(payload.state)
-    except ValueError as exc:
+    language = resolve_language(accept_language)
+    if limiter.enabled:
+        limiter._check_request_limit(request, solve_cube, False)
+    csrf_cookie = request.cookies.get(context.settings.csrf_cookie_name)
+    csrf_header = request.headers.get(context.settings.csrf_header_name)
+    if not csrf_cookie or csrf_cookie != csrf_header:
+        message = translate("invalid_csrf", language)
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"error": str(exc)}
-        ) from exc
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "invalid_csrf", "message": message},
+        )
 
     try:
-        moves = solver.solve(payload.state)
-    except ValueError as exc:  # pragma: no cover - defensive
+        normalized = context.validator.validate(payload.state)
+    except CubeValidationError as exc:
+        message = translate(exc.message_key, language, **(exc.context or {}))
+        LOGGER.info(
+            "validation_error",
+            code=exc.message_key,
+            state_hash=mask_state(payload.state),
+        )
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": str(exc)}
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": exc.message_key, "message": message},
         ) from exc
 
-    return SolveResponse(moves=moves)
+    moves, source = await context.solver.solve(normalized)
+    result = SolveResponse(moves=moves, source=source)
+
+    if limiter.enabled and hasattr(request.state, "view_rate_limit"):
+        limiter._inject_headers(response, request.state.view_rate_limit)
+
+    return result

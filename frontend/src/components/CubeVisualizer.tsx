@@ -1,68 +1,72 @@
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 
-const FACE_ORDER = ['U', 'R', 'F', 'D', 'L', 'B'] as const;
-const FACE_NAMES: Record<(typeof FACE_ORDER)[number], string> = {
-  U: 'Верх',
-  R: 'Правая',
-  F: 'Передняя',
-  D: 'Нижняя',
-  L: 'Левая',
-  B: 'Задняя',
+import useCubeStore, { FACE_COLOR_MAP, FACE_ORDER, Face } from '../store/useCubeStore';
+import { FACELET_KEYS } from '../utils/facelets';
+
+const CUBE_SIZE = 180;
+const FACE_OFFSET = CUBE_SIZE / 2;
+
+const FACE_TRANSFORMS: Record<Face, string> = {
+  U: `rotateX(90deg) translateZ(${FACE_OFFSET}px)`,
+  D: `rotateX(-90deg) translateZ(${FACE_OFFSET}px)`,
+  F: `translateZ(${FACE_OFFSET}px)`,
+  B: `rotateY(180deg) translateZ(${FACE_OFFSET}px)`,
+  L: `rotateY(-90deg) translateZ(${FACE_OFFSET}px)`,
+  R: `rotateY(90deg) translateZ(${FACE_OFFSET}px)`,
 };
 
-const COLOR_CLASS: Record<string, string> = {
-  U: 'cube-visualizer__sticker--up',
-  R: 'cube-visualizer__sticker--right',
-  F: 'cube-visualizer__sticker--front',
-  D: 'cube-visualizer__sticker--down',
-  L: 'cube-visualizer__sticker--left',
-  B: 'cube-visualizer__sticker--back',
-};
+const CubeVisualizer = () => {
+  const faces = useCubeStore((state) => state.faces);
+  const { t } = useTranslation();
 
-type CubeVisualizerProps = {
-  state: string;
-};
-
-type Face = {
-  id: (typeof FACE_ORDER)[number];
-  stickers: string[];
-};
-
-const buildFaces = (state: string): Face[] => {
-  if (state.length < 54) {
-    return FACE_ORDER.map((face) => ({ id: face, stickers: Array(9).fill(face) }));
-  }
-
-  const faces: Face[] = [];
-  let index = 0;
-  FACE_ORDER.forEach((face) => {
-    faces.push({ id: face, stickers: state.slice(index, index + 9).split('') });
-    index += 9;
-  });
-  return faces;
-};
-
-const CubeVisualizer = ({ state }: CubeVisualizerProps) => {
-  const faces = useMemo(() => buildFaces(state), [state]);
+  const cubeFaces = useMemo(
+    () =>
+      FACE_ORDER.map((face) => ({
+        id: face,
+        stickers: faces[face],
+      })),
+    [faces],
+  );
 
   return (
-    <div className="cube-visualizer" aria-live="polite">
-      {faces.map((face) => (
-        <div key={face.id} className="cube-visualizer__face">
-          <h2 className="cube-visualizer__face-title">{FACE_NAMES[face.id]}</h2>
-          <div className="cube-visualizer__grid">
-            {face.stickers.map((sticker, index) => (
-              <span
-                key={`${face.id}-${index}`}
-                className={`cube-visualizer__sticker ${COLOR_CLASS[sticker] ?? ''}`}
-                aria-label={`${FACE_NAMES[face.id]}: ${sticker}`}
-              />
-            ))}
-          </div>
+    <section className="rounded-xl border border-slate-700 bg-slate-900/60 p-4 shadow-lg">
+      <header className="flex flex-col gap-1">
+        <h2 className="text-lg font-semibold text-slate-100">{t('visualizer.heading')}</h2>
+        <p className="text-sm text-slate-300">{t('visualizer.subtitle')}</p>
+      </header>
+      <div className="mt-6 flex w-full justify-center">
+        <div
+          className="cube"
+          style={{
+            width: `${CUBE_SIZE}px`,
+            height: `${CUBE_SIZE}px`,
+          }}
+        >
+          {cubeFaces.map(({ id, stickers }) => (
+            <div
+              key={id}
+              className="cube-face"
+              style={{
+                transform: FACE_TRANSFORMS[id],
+                width: `${CUBE_SIZE}px`,
+                height: `${CUBE_SIZE}px`,
+              }}
+            >
+              {stickers.map((sticker, index) => (
+                <span
+                  key={`${id}-${FACELET_KEYS[index]}`}
+                  className="cube-sticker"
+                  style={{ backgroundColor: FACE_COLOR_MAP[sticker as Face] ?? '#1f2937' }}
+                  aria-hidden="true"
+                />
+              ))}
+            </div>
+          ))}
         </div>
-      ))}
-    </div>
+      </div>
+    </section>
   );
 };
 
-export default CubeVisualizer;
+export default memo(CubeVisualizer);
